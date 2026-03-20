@@ -7,12 +7,18 @@ Wraps `zcash_address`, `zip321`, and `zcash_keys` into four Python functions. Al
 ## Install
 
 ```
-pip install maturin
-git clone https://github.com/craigraw/pyzcash && cd pyzcash
-maturin develop
+pip install pyzcash
 ```
 
-Needs a Rust toolchain. Pre-built wheels coming eventually.
+A pre-built wheel is available for macOS ARM64 / Python 3.14. For other platforms, pip will build from the source distribution, which requires a [Rust toolchain](https://rustup.rs).
+
+To build from source directly:
+
+```
+git clone https://github.com/davisonio/pyzcash && cd pyzcash
+pip install maturin
+maturin develop
+```
 
 ## Usage
 
