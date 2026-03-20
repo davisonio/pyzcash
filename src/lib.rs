@@ -1,8 +1,10 @@
-use pyo3::prelude::*;
-use pyo3::exceptions::PyValueError;
+use std::collections::BTreeSet;
 
-use zcash_address::{ConversionError, TryFromAddress, ZcashAddress};
+use pyo3::exceptions::PyValueError;
+use pyo3::prelude::*;
+
 use zcash_address::unified;
+use zcash_address::{ConversionError, TryFromAddress, ZcashAddress};
 use zcash_keys::keys::{UnifiedAddressRequest, UnifiedSpendingKey};
 use zcash_protocol::consensus::{Network, NetworkType};
 use zip321::{Payment, TransactionRequest};
@@ -18,10 +20,7 @@ struct AddressClassification {
 impl TryFromAddress for AddressClassification {
     type Error = ();
 
-    fn try_from_sprout(
-        net: NetworkType,
-        _data: [u8; 64],
-    ) -> Result<Self, ConversionError<()>> {
+    fn try_from_sprout(net: NetworkType, _data: [u8; 64]) -> Result<Self, ConversionError<()>> {
         Ok(Self {
             address_type: "sprout".into(),
             network: net_str(net),
@@ -29,10 +28,7 @@ impl TryFromAddress for AddressClassification {
         })
     }
 
-    fn try_from_sapling(
-        net: NetworkType,
-        _data: [u8; 43],
-    ) -> Result<Self, ConversionError<()>> {
+    fn try_from_sapling(net: NetworkType, _data: [u8; 43]) -> Result<Self, ConversionError<()>> {
         Ok(Self {
             address_type: "sapling".into(),
             network: net_str(net),
@@ -73,10 +69,7 @@ impl TryFromAddress for AddressClassification {
         })
     }
 
-    fn try_from_tex(
-        net: NetworkType,
-        _data: [u8; 20],
-    ) -> Result<Self, ConversionError<()>> {
+    fn try_from_tex(net: NetworkType, _data: [u8; 20]) -> Result<Self, ConversionError<()>> {
         Ok(Self {
             address_type: "tex".into(),
             network: net_str(net),
@@ -99,6 +92,28 @@ fn resolve_network(name: &str) -> PyResult<Network> {
         "test" => Ok(Network::TestNetwork),
         _ => Err(PyValueError::new_err("network must be 'main' or 'test'")),
     }
+}
+
+fn amount_param_indices(uri: &str) -> BTreeSet<usize> {
+    let mut indices = BTreeSet::new();
+
+    let Some((_, query)) = uri.split_once('?') else {
+        return indices;
+    };
+
+    for pair in query.split('&') {
+        let key = pair.split_once('=').map(|(key, _)| key).unwrap_or(pair);
+
+        if key == "amount" {
+            indices.insert(0);
+        } else if let Some(index) = key.strip_prefix("amount.") {
+            if let Ok(index) = index.parse::<usize>() {
+                indices.insert(index);
+            }
+        }
+    }
+
+    indices
 }
 
 // ---- Python-facing types ----
@@ -223,14 +238,16 @@ fn parse_address(address: &str) -> PyResult<AddressInfo> {
 #[pyfunction]
 fn parse_payment_uri(uri: &str) -> PyResult<Vec<PaymentInfo>> {
     let req = TransactionRequest::from_uri(uri)
-        .map_err(|e| PyValueError::new_err(format!("invalid payment URI: {e:?}")))?;
+        .map_err(|e| PyValueError::new_err(format!("invalid payment URI: {e}")))?;
+    let amount_indices = amount_param_indices(uri);
 
     let mut payments = Vec::new();
-    for (_idx, payment) in req.payments() {
-        let amount: u64 = payment.amount().into();
+    for (idx, payment) in req.payments() {
         payments.push(PaymentInfo {
             address: payment.recipient_address().encode(),
-            amount_zatoshis: Some(amount),
+            amount_zatoshis: amount_indices
+                .contains(idx)
+                .then(|| payment.amount().into()),
             memo: payment.memo().map(|m| m.as_slice().to_vec()),
             label: payment.label().cloned(),
             message: payment.message().cloned(),
@@ -254,31 +271,35 @@ fn create_payment_uri(address: &str, amount_zatoshis: u64) -> PyResult<String> {
 
     let payment = Payment::without_memo(addr, amount);
     let req = TransactionRequest::new(vec![payment])
-        .map_err(|e| PyValueError::new_err(format!("cannot create request: {e:?}")))?;
+        .map_err(|e| PyValueError::new_err(format!("cannot create request: {e}")))?;
 
     Ok(req.to_uri())
 }
 
 /// Derive a unified address from a wallet seed.
 ///
-/// The seed should be 32 or 64 bytes (typically from BIP-39 mnemonic).
+/// The seed must be at least 32 bytes. 32- and 64-byte seeds are common.
 /// Network must be "main" or "test". Account is a ZIP-32 account index (usually 0).
 ///
 /// Uses librustzcash key derivation with Orchard + Sapling receivers.
 #[pyfunction]
 fn derive_address(seed: Vec<u8>, network: &str, account: u32) -> PyResult<DerivedAddress> {
+    if seed.len() < 32 {
+        return Err(PyValueError::new_err("seed must be at least 32 bytes"));
+    }
+
     let net = resolve_network(network)?;
 
     let account_id = zip32::AccountId::try_from(account)
         .map_err(|_| PyValueError::new_err("invalid account index"))?;
 
     let usk = UnifiedSpendingKey::from_seed(&net, &seed, account_id)
-        .map_err(|e| PyValueError::new_err(format!("key derivation failed: {e:?}")))?;
+        .map_err(|e| PyValueError::new_err(format!("key derivation failed: {e}")))?;
 
     let ufvk = usk.to_unified_full_viewing_key();
     let (ua, _di) = ufvk
         .default_address(UnifiedAddressRequest::SHIELDED)
-        .map_err(|e| PyValueError::new_err(format!("address generation failed: {e:?}")))?;
+        .map_err(|e| PyValueError::new_err(format!("address generation failed: {e}")))?;
 
     let address_str = ua.encode(&net);
 
@@ -295,7 +316,7 @@ fn derive_address(seed: Vec<u8>, network: &str, account: u32) -> PyResult<Derive
 /// and HD key derivation via Zcash's official Rust libraries.
 #[pymodule]
 fn pyzcash(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add("__version__", "0.1.0-alpha")?;
+    m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     m.add_class::<AddressInfo>()?;
     m.add_class::<PaymentInfo>()?;
     m.add_class::<DerivedAddress>()?;
