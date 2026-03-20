@@ -1,0 +1,27 @@
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "pyzcash"
+version = "0.1.0a1"
+description = "Python bindings for librustzcash: address parsing, ZIP-321 URIs, and key derivation"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Rust",
+]
+
+[tool.maturin]
+features = ["pyo3/extension-module"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0", "maturin>=1.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
