@@ -39,7 +39,7 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.3.0  # no floating major tag since v8
         with:
           enable-cache: true
       - run: uv sync --python 3.14 --extra dev
