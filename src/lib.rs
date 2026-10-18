@@ -1,4 +1,3 @@
-use std::collections::BTreeSet;
 
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
@@ -94,32 +93,10 @@ fn resolve_network(name: &str) -> PyResult<Network> {
     }
 }
 
-fn amount_param_indices(uri: &str) -> BTreeSet<usize> {
-    let mut indices = BTreeSet::new();
-
-    let Some((_, query)) = uri.split_once('?') else {
-        return indices;
-    };
-
-    for pair in query.split('&') {
-        let key = pair.split_once('=').map(|(key, _)| key).unwrap_or(pair);
-
-        if key == "amount" {
-            indices.insert(0);
-        } else if let Some(index) = key.strip_prefix("amount.") {
-            if let Ok(index) = index.parse::<usize>() {
-                indices.insert(index);
-            }
-        }
-    }
-
-    indices
-}
-
 // ---- Python-facing types ----
 
 /// Parsed information about a Zcash address.
-#[pyclass(frozen, get_all, skip_from_py_object)]
+#[pyclass(frozen, get_all)]
 #[derive(Clone)]
 struct AddressInfo {
     /// Re-encoded canonical form of the address.
@@ -143,7 +120,7 @@ impl AddressInfo {
 }
 
 /// A single payment parsed from a ZIP-321 URI.
-#[pyclass(frozen, get_all, skip_from_py_object)]
+#[pyclass(frozen, get_all)]
 #[derive(Clone)]
 struct PaymentInfo {
     /// Recipient address string.
@@ -180,7 +157,7 @@ impl PaymentInfo {
 }
 
 /// Derived key material and address.
-#[pyclass(frozen, get_all, skip_from_py_object)]
+#[pyclass(frozen, get_all)]
 #[derive(Clone)]
 struct DerivedAddress {
     /// Unified address string.
@@ -239,15 +216,11 @@ fn parse_address(address: &str) -> PyResult<AddressInfo> {
 fn parse_payment_uri(uri: &str) -> PyResult<Vec<PaymentInfo>> {
     let req = TransactionRequest::from_uri(uri)
         .map_err(|e| PyValueError::new_err(format!("invalid payment URI: {e}")))?;
-    let amount_indices = amount_param_indices(uri);
-
     let mut payments = Vec::new();
-    for (idx, payment) in req.payments() {
+    for payment in req.payments().values() {
         payments.push(PaymentInfo {
             address: payment.recipient_address().encode(),
-            amount_zatoshis: amount_indices
-                .contains(idx)
-                .then(|| payment.amount().into()),
+            amount_zatoshis: payment.amount().map(u64::from),
             memo: payment.memo().map(|m| m.as_slice().to_vec()),
             label: payment.label().cloned(),
             message: payment.message().cloned(),

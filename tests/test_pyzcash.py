@@ -99,11 +99,16 @@ class TestParsePaymentURI:
         assert payments[0].amount_zec is None
 
     def test_zero_amount_is_preserved(self):
-        uri = f"zcash:{TESTNET_TRANSPARENT}?amount=0"
+        uri = f"zcash:{TESTNET_SAPLING}?amount=0"
         payments = pyzcash.parse_payment_uri(uri)
         assert len(payments) == 1
         assert payments[0].amount_zatoshis == 0
         assert payments[0].amount_zec == 0
+
+    def test_zero_amount_to_transparent_is_rejected(self):
+        # Consensus disallows zero-valued transparent outputs, so zip321 rejects the request.
+        with pytest.raises(ValueError, match="zero-valued transparent"):
+            pyzcash.parse_payment_uri(f"zcash:{TESTNET_TRANSPARENT}?amount=0")
 
     def test_sapling_with_memo(self):
         uri = (
